@@ -1,0 +1,192 @@
+---
+title: "Storm Data From 1950 to 2010"
+output:
+  pdf_document: default
+  
+---
+
+In the following data set there are 
+**Here is a link to the PDF documentation page of the data set:**
+[Documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf)
+
+**Here is link to the PDF FAQ page:**
+[FAQ](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf)
+  
+From the Storm Data the total damage (economic consequences) and total impact to health (injuries plus deaths) were calculated both before and after extensive cleaning of the data. Most of the cleaning took place with the EVTYPE, there were 48 event type names given in the Documentation link found above. These event types were stored in a new column, some events fell under two categories because they did not have one classification in the title. Since the question was to find the most impactful event type on health and economic impact, the event types had to be broken down to the most basic form. From this analysis, the same event types had the highest impact both before and after data cleaning.  
+  
+**Data Processing**    
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+Libraries used.
+```{r}
+library(stringr)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(readr)
+
+```
+Read in the table if it already exists, if not, download it and then read it in. 
+```{r}
+
+if(file.exists('stormdata')){
+      file.remove('stormdata')
+}      
+
+url <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+download.file(url, 'stormdata' )
+stormdata <- read.table('stormdata', comment.char='#',
+                        header=T, sep=',')
+
+```
+
+New damage columns were created that show the actual numbers from the given amount and exponents. A new property damage, crop damage and total damage were create. NAs or any non matches of "H , K, M, or B" were substituted with 0 in the PROPDMG and CROPDMG columns and with 1 for the exponent columns to act as the multiplicative identity. 
+```{r}
+#Change damage to actual numbers "PROPDMG" "PROPDMGEXP" "CROPDMG"  "CROPDMGEXP"
+#NA is 1 to be the multiplicative identity, K is 1000, M is 1000000, B is 1000000000
+
+stormdata$PROPDMGEXP <- toupper(stormdata$PROPDMGEXP)
+stormdata$PROPDMGEXP[!((stormdata$PROPDMGEXP>='A'& stormdata$PROPDMGEXP<='Z')|stormdata$PROPDMGEXP=='')] <- '1'
+stormdata$PROPDMGEXP[stormdata$PROPDMGEXP==""] <-1
+stormdata$PROPDMGEXP <-gsub('H', '100', stormdata$PROPDMGEXP)
+stormdata$PROPDMGEXP <-gsub('K', '1000', stormdata$PROPDMGEXP)
+stormdata$PROPDMGEXP <-gsub('M', '1000000', stormdata$PROPDMGEXP)
+stormdata$PROPDMGEXP <-gsub('B', '1000000000', stormdata$PROPDMGEXP)
+stormdata$PROPDMGEXP<-as.numeric(stormdata$PROPDMGEXP)
+actpropdmg <- stormdata$PROPDMGEXP*stormdata$PROPDMG 
+
+stormdata<- cbind(stormdata, actpropdmg)
+
+
+
+stormdata$CROPDMGEXP <- toupper(stormdata$CROPDMGEXP)
+stormdata$CROPDMGEXP[!((stormdata$CROPDMGEXP>='A'& stormdata$CROPDMGEXP<='Z')|stormdata$CROPDMGEXP=='')] <- '0'
+stormdata$CROPDMGEXP[stormdata$CROPDMGEXP==""] <-1
+stormdata$CROPDMGEXP <-gsub('H', '100', stormdata$CROPDMGEXP)
+stormdata$CROPDMGEXP <-gsub('K', '1000', stormdata$CROPDMGEXP)
+stormdata$CROPDMGEXP <-gsub('M', '1000000', stormdata$CROPDMGEXP)
+stormdata$CROPDMGEXP <-gsub('B', '1000000000', stormdata$CROPDMGEXP)
+stormdata$CROPDMGEXP<-as.numeric(stormdata$CROPDMGEXP)
+actcropdmg <- stormdata$CROPDMGEXP*stormdata$CROPDMG 
+
+stormdata<- cbind(stormdata, actcropdmg)
+
+
+health <- stormdata$FATALITIES+stormdata$INJURIES
+stormdata <- cbind(stormdata, health)
+totdmg <- stormdata$actpropdmg+stormdata$actcropdmg
+stormdata <- cbind(stormdata, totdmg)
+```
+
+
+The calculations for the most impactful event types were made before and after the cleaning and simplification of the event types. 
+```{r}
+#names(stormdata) <- stormdata[1,]
+
+healthsum <- tapply(stormdata$health, stormdata$EVTYPE, sum, na.rm=T)
+healthmean <- tapply(stormdata$health, stormdata$EVTYPE, mean, na.rm=T)
+maxmean <- max(healthmean)
+maxsum <- max(healthsum)
+maxhealthname <- noquote(names(subset(healthsum, healthsum==maxsum)))
+
+
+ecosum <- tapply(stormdata$totdmg, stormdata$EVTYPE, sum, na.rm=T)
+ecomean <- tapply(stormdata$totdmg, stormdata$EVTYPE, mean, na.rm=T)
+maxmeaneco <- max(ecomean)
+maxsumeco <- max(ecosum)
+maxecosumname <- noquote(names(subset(ecosum, ecosum==maxsumeco)))
+```
+  
+**Pre Cleaning Results**
+Before extensive event type cleaning:
+The event type with the maximum health impact is: ``r maxhealthname``  
+The event type with the maximum economic impact is: ``r maxecosumname``  
+
+Here is more extensive cleaning of the event types that is narrowed down to 48 types. Due to the fact that there are certain types that fall under two categories, they are stored under both types which means there are some duplicates. Doing it this ways has some negatives but also some benefits. 
+The list of event type names can be found in the 'Documentation' link given above. In section 2.1.1 there is a list of 48 event types that were added to a list.  
+The event type 'Hurricane (Typhoon)' was changed to 'Hurricane/Typhoon' so it would have the same format as the other event types with a '/'.
+
+```{r}
+eventname <- c('Astronomical Low Tide', 'Avalanche', 'Blizzard', 'Coastal Flood','Cold Wind/Chill', 'Debris Flow',
+               'Dense Fog', 'Dense Smoke', 'Drought', 'Dust Devil', 'Dust Storm', 'Excessive Heat', 'Extreme Cold/Wind Chill', 'Flash Flood', 'Flood',
+               'Frost/Freeze', 'Funnel Cloud', 'Freezing Fog', 'Hail', 'Heat', 'Heavy Rain', 'Heavy Snow', 'High Surf', 'High Wind', 'Hurricane/Typhoon',
+               'Ice Storm', 'Lake-Effect Snow', 'Lakeshore Flood', 'Lightning', 'Marine Hail', 'Marine High Wind', 'Marine Strong Wind', 'Marine Thunderstorm Wind', 'Rip Current',
+               'Seiche', 'Sleet', 'Storm Surge/Tide', 'Strong Wind', 'Thunderstorm Wind ', 'Tornado', 'Tropical Depression', 'Tropical Storm', 'Tsunami', 'Volcanic Ash', 'Waterspout',
+               'Wildfire','Winter Storm', 'Winter Weather')
+df<- NULL
+for(i in eventname){
+      sub<-NULL
+      if(grepl('/', i, fixed = T)){
+            str<-str_split(i, '/')
+            sub <- stormdata[grepl(toupper(unlist(str)[1]), stormdata$EVTYPE, fixed=T)|grepl(toupper(unlist(str)[2]), stormdata$EVTYPE, fixed=T),]
+            if(length(sub[,1])>0){
+                  b <- c()
+                  for(f in 1:length(sub[,1])){
+                        b <- c(b,i)
+                  }
+                  sub <- cbind(sub, b)
+                  
+                  df<-rbind(df, sub)
+            }
+      }
+      else{
+      sub <- stormdata[grepl(toupper(i), stormdata$EVTYPE, fixed=T),]
+      if(length(sub[,1])>0){
+       b <- c()
+            for(f in 1:length(sub[,1])){
+            b <- c(b,i)
+            }
+      sub <- cbind(sub, b)
+      
+      df<-rbind(df, sub)
+      }
+      }
+}
+month <- as.POSIXct(df$BGN_DATE, format = "%m/%d/%Y %H:%M:%S")
+month <- format(month, format="%m")
+df<- cbind(month, df)
+year <- as.POSIXct(df$BGN_DATE, format = "%m/%d/%Y %H:%M:%S")
+year <- format(year, format="%Y")
+df<- cbind(year, df)
+```
+
+
+After the cleaning and forming the groups the event types with the greatest impact were recalculated. 
+```{r}
+df_healthsum <- tapply(df$health, df$b, sum, na.rm=T)
+df_healthmean <- tapply(df$health, df$b, mean, na.rm=T)
+df_maxmean <- max(df_healthmean)
+df_maxsum <- max(df_healthsum)
+df_maxhealthname <- names(subset(df_healthsum,df_healthsum==df_maxsum))
+
+
+df_ecosum <- tapply(df$totdmg, df$b, sum, na.rm=T)
+df_ecomean <- tapply(df$totdmg, df$b, mean, na.rm=T)
+df_maxmeaneco <- max(df_ecomean)
+df_maxsumeco <- max(df_ecosum)
+df_maxecosumname <- names(subset(df_ecosum, df_ecosum==df_maxsumeco))
+df_maxecotype <- subset(df, df$b==df_maxecosumname)
+meanbyyear <- tapply(df_maxecotype$totdmg, df_maxecotype$year, mean, na.rm=T)
+meanbymonth <- tapply(df_maxecotype$totdmg, df_maxecotype$month, mean, na.rm=T)
+```
+**Results**  
+After further event type cleaning:
+The event type with the maximum health impact is: ``r df_maxhealthname``    
+The event type with the maximum economic impact is: ``r df_maxecosumname``    
+As you can see the event type did not change, but the actual values did.   
+To compare the values;  
+Before cleaning the event types the maximum health impact was ``r maxsum`` and after it was ``r df_maxsum`` 
+Before cleaning the event types the maximum economy impact was ``r maxsumeco `` and after it was ``r df_maxsumeco ``
+
+Now that we know which event type had the greatest economic impact, here, is are two graphs representing the impact over time. 
+```{r}
+dfmaxeco <- subset(df, df$b==names(subset(df_ecosum, df_ecosum==df_maxsumeco)))
+dfmaxhealth <- subset(df, df$b==names(subset(df_healthsum, df_healthsum==df_maxsum)))
+qplot( names(meanbymonth),meanbymonth, main=paste('Economic Impact from ',df_maxecosumname ), ylab='Total Cost of Damage by Month', xlab='Month')
+qplot( names(meanbyyear),meanbyyear, main=paste('Economic Impact from',df_maxecosumname) , ylab='Total Cost of Damage by Year', xlab='Year')
+
+```
+  
+    
